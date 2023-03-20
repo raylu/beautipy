@@ -17,10 +17,10 @@ def beautify(f) -> typing.Iterable[str]:
 	assert encoding.type == token.ENCODING
 
 	indentation = 0
-	stack: list[int] = []
+	stack = Stack()
 	line = ''
 	for tok in tokens:
-		print(token.tok_name[tok.exact_type], tok)
+		print(token.tok_name[tok.exact_type], tok, file=sys.stderr)
 		if tok.type == token.NEWLINE:
 			yield '\t' * indentation + line
 			line = ''
@@ -31,7 +31,7 @@ def beautify(f) -> typing.Iterable[str]:
 		else:
 			# prefix
 			if tok.type == token.OP:
-				if tok.exact_type == token.EQUAL:
+				if tok.exact_type == token.EQUAL and stack.top() != token.LPAR:
 					line += ' '
 
 			line += tok.string
@@ -41,15 +41,40 @@ def beautify(f) -> typing.Iterable[str]:
 				if keyword.iskeyword(tok.string) and tok.string not in ('True', 'False', 'None'):
 					line += ' '
 			elif tok.type == token.OP:
-				if tok.exact_type == token.EQUAL:
+				if tok.exact_type == token.COMMA:
+					line += ' '
+				elif tok.exact_type == token.EQUAL and stack.top() != token.LPAR:
+					line += ' '
+				elif tok.exact_type == token.COLON and stack.top() == token.LBRACE:
 					line += ' '
 
 			# modify stack
 			if tok.type == token.OP:
 				if tok.exact_type in (token.LPAR, token.LSQB, token.LBRACE):
-					stack.append(tok.exact_type)
+					stack.push(tok.exact_type)
 				elif tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
-					stack.pop()
+					stack.pop(tok.exact_type)
+
+class Stack:
+	def __init__(self):
+		self.stack: list[int] = []
+
+	def push(self, tok: int) -> None:
+		self.stack.append(tok)
+
+	def pop(self, tok: int) -> int:
+		top = self.stack.pop()
+		if tok == token.RPAR:
+			assert top == token.LPAR
+		elif tok == token.RSQB:
+			assert top == token.LSQB
+		if tok == token.RBRACE:
+			assert top == token.LBRACE
+		return top
+
+	def top(self) -> typing.Optional[int]:
+		if len(self.stack) > 0:
+			return self.stack[-1]
 
 if __name__ == '__main__':
 	main()
