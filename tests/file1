@@ -1,0 +1,4 @@
+def fn(a, b=1):
+	r = {'cow': 'moo'}
+	if True:
+	    return r
