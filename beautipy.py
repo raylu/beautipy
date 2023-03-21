@@ -11,7 +11,7 @@ def main() -> None:
 		with open(path, 'rb') as f:
 			print('\n'.join(beautify(f)))
 
-def beautify(f) -> typing.Iterable[str]:
+def beautify(f: typing.BinaryIO) -> typing.Iterable[str]:
 	tokens = tokenize.tokenize(f.readline)
 	encoding = next(tokens)
 	assert encoding.type == token.ENCODING
