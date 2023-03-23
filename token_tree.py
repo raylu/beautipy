@@ -6,7 +6,7 @@ import typing
 @dataclasses.dataclass(eq=False)
 class TokenTreeNode:
 	context: typing.Optional[int]
-	formatted: typing.Optional[str] = None
+	formatted: typing.Optional[list[str]] = None
 	children: list[typing.Union[tokenize.TokenInfo, 'TokenTreeNode']] = dataclasses.field(default_factory=list)
 
 class TokenTree:
