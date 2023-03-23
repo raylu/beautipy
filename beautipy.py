@@ -6,6 +6,8 @@ import token
 import tokenize
 import typing
 
+import token_tree
+
 def main() -> None:
 	for path in sys.argv[1:]:
 		with open(path, 'rb') as f:
@@ -19,7 +21,6 @@ def beautify(f: typing.BinaryIO) -> typing.Iterable[str]:
 	indentation = 0
 	line_tokens: list[tokenize.TokenInfo] = []
 	for tok in tokens:
-		print(token.tok_name[tok.exact_type], tok, file=sys.stderr)
 		if tok.type == token.NEWLINE:
 			yield '\t' * indentation + _format_line(line_tokens)
 			line_tokens.clear()
@@ -33,12 +34,32 @@ def beautify(f: typing.BinaryIO) -> typing.Iterable[str]:
 	assert tok.type == token.ENDMARKER
 
 def _format_line(line_tokens: list[tokenize.TokenInfo]) -> str:
-	line = ''
-	stack = Stack()
+	tree = token_tree.TokenTree()
 	for tok in line_tokens:
+		if tok.type == token.OP and tok.exact_type in (token.LPAR, token.LSQB, token.LBRACE):
+			tree.push(tok.exact_type)
+
+		tree.append(tok)
+
+		if tok.type == token.OP and tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
+			tree.pop(tok.exact_type)
+
+	assert len(tree.stack) == 1
+	return _format_node(tree.root)
+
+def _format_node(node: token_tree.TokenTreeNode):
+	line = ''
+	for tok in node.children:
+		if isinstance(tok, token_tree.TokenTreeNode):
+			line += _format_node(tok)
+			continue
+
+		if tok.type == token.NL:
+			continue
+
 		# prefix
 		if tok.type == token.OP:
-			if tok.exact_type == token.EQUAL and stack.top() != token.LPAR:
+			if tok.exact_type == token.EQUAL and node.context != token.LPAR:
 				line += ' '
 
 		line += tok.string
@@ -50,40 +71,13 @@ def _format_line(line_tokens: list[tokenize.TokenInfo]) -> str:
 		elif tok.type == token.OP:
 			if tok.exact_type == token.COMMA:
 				line += ' '
-			elif tok.exact_type == token.EQUAL and stack.top() != token.LPAR:
+			elif tok.exact_type == token.EQUAL and node.context != token.LPAR:
 				line += ' '
-			elif tok.exact_type == token.COLON and stack.top() == token.LBRACE:
+			elif tok.exact_type == token.COLON and node.context == token.LBRACE:
 				line += ' '
 
-		# modify stack
-		if tok.type == token.OP:
-			if tok.exact_type in (token.LPAR, token.LSQB, token.LBRACE):
-				stack.push(tok.exact_type)
-			elif tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
-				stack.pop(tok.exact_type)
-
+	node.formatted = line
 	return line
-
-class Stack:
-	def __init__(self):
-		self.stack: list[int] = []
-
-	def push(self, tok: int) -> None:
-		self.stack.append(tok)
-
-	def pop(self, tok: int) -> int:
-		top = self.stack.pop()
-		if tok == token.RPAR:
-			assert top == token.LPAR
-		elif tok == token.RSQB:
-			assert top == token.LSQB
-		if tok == token.RBRACE:
-			assert top == token.LBRACE
-		return top
-
-	def top(self) -> typing.Optional[int]:
-		if len(self.stack) > 0:
-			return self.stack[-1]
 
 if __name__ == '__main__':
 	main()

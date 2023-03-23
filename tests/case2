@@ -1,0 +1,2 @@
+v = {'animals': [('cow', 'moo'), ('dog', 'woof'), ('pig',
+'oink'), ('cat', 'meow')], 'plants': [('tree', '...')]}
