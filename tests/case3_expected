@@ -1,0 +1,15 @@
+v = {
+	'animals': [
+		('cow', 'moo'),
+		('dog', 'woof'),
+		('pig', 'oink'),
+		('cat', 'meow'),
+		('bird', 'chirp'),
+		('duck', 'quack'),
+		('snake', 'hiss'),
+	],
+	'plants': [
+		('tree', '...'),
+		('flower', '...'),
+	],
+}
