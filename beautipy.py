@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import io
 import keyword
 import sys
 import token
@@ -60,6 +59,7 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 	if depth == 0:
 		lines.write('\t' * indentation)
 
+	prev_token_was_comma = False
 	for tok in node.children:
 		if isinstance(tok, token_tree.TokenTreeNode):
 			if tok.formatted is None or depth + 1 == split_depth:
@@ -77,11 +77,13 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 		# prefix
 		if tok.type == token.OP:
 			if tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
-				if depth <= split_depth:
+				if depth <= split_depth and not prev_token_was_comma:
 					lines.write(',')
 					lines.new_line()
 			elif tok.exact_type == token.EQUAL and node.context != token.LPAR:
 				lines.write(' ')
+		elif depth <= split_depth and prev_token_was_comma:
+			lines.write('\t')
 
 		lines.write(tok.string)
 
@@ -97,13 +99,14 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 			elif tok.exact_type == token.COMMA:
 				if depth <= split_depth:
 					lines.new_line()
-					lines.write('\t')
 				else:
 					lines.write(' ')
 			elif tok.exact_type == token.EQUAL and node.context != token.LPAR:
 				lines.write(' ')
 			elif tok.exact_type == token.COLON and node.context == token.LBRACE:
 				lines.write(' ')
+
+		prev_token_was_comma = tok.exact_type == token.COMMA
 
 	node.formatted = lines.get_values()
 
