@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 
+import difflib
 import keyword
-import sys
 import token
 import tokenize
 import typing
 
+from config import config
 import line_manager
 import token_tree
 
 def main() -> None:
-	for path in sys.argv[1:]:
-		with open(path, 'rb') as f:
-			print('\n'.join(beautify(f)))
+	for path in config.filepaths:
+		if config.diff:
+			with path.open('r') as f:
+				orig_lines = f.readlines()
+			with path.open('rb') as f:
+				formatted_lines = [line + '\n' for line in beautify(f)]
+			print(''.join(difflib.unified_diff(orig_lines, formatted_lines)))
+		else:
+			with path.open('rb') as f:
+				print('\n'.join(beautify(f)))
 
 def beautify(f: typing.BinaryIO) -> typing.Iterable[str]:
 	tokens = tokenize.tokenize(f.readline)
