@@ -16,13 +16,14 @@ def main() -> None:
 			with path.open('r') as f:
 				orig_lines = f.readlines()
 			with path.open('rb') as f:
-				formatted_lines = [line + '\n' for line in beautify(f)]
+				formatted = '\n'.join(beautify(f, config.line_nos))
+				formatted_lines = [line + '\n' for line in formatted.split('\n')]
 			print(''.join(difflib.unified_diff(orig_lines, formatted_lines)))
 		else:
 			with path.open('rb') as f:
-				print('\n'.join(beautify(f)))
+				print('\n'.join(beautify(f, config.line_nos)))
 
-def beautify(f: typing.BinaryIO) -> typing.Iterable[str]:
+def beautify(f: typing.BinaryIO, line_nos: typing.Optional[tuple[int, int]]) -> typing.Iterable[str]:
 	tokens = tokenize.tokenize(f.readline)
 	encoding = next(tokens)
 	assert encoding.type == token.ENCODING
@@ -31,7 +32,21 @@ def beautify(f: typing.BinaryIO) -> typing.Iterable[str]:
 	indentation = 0
 	for tok in tokens:
 		if tok.type == token.NEWLINE:
-			yield _format_line(line_tokens, indentation)
+			if line_nos is None:
+				yield _format_line(line_tokens, indentation)
+			else:
+				format_start, format_end = line_nos
+				line_start = line_tokens[0].start[0]
+				line_end = line_tokens[-1].end[0]
+				if format_start <= line_end and line_start <= format_end:
+					yield _format_line(line_tokens, indentation)
+				else:
+					# reproduce the line exactly
+					print_next = True
+					for tok in line_tokens:
+						if print_next:
+							yield tok.line.rstrip('\n')
+						print_next = tok.type == token.NL
 			line_tokens.clear()
 		elif tok.type == token.INDENT:
 			indentation += 1
