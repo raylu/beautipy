@@ -1,0 +1,4 @@
+v = {
+	'animals': [('cow', 'moo'), ('dog', 'woof')], # this is a comment
+	'plants': [('tree', '...'), ('flower', '...')],
+}

@@ -3,11 +3,13 @@ import token
 import tokenize
 import typing
 
+Node = typing.Union[tokenize.TokenInfo, 'TokenTreeNode']
+
 @dataclasses.dataclass(eq=False)
 class TokenTreeNode:
 	context: typing.Optional[int]
 	formatted: typing.Optional[list[str]] = None
-	children: list[typing.Union[tokenize.TokenInfo, 'TokenTreeNode']] = dataclasses.field(default_factory=list)
+	children: list[Node] = dataclasses.field(default_factory=list)
 
 class TokenTree:
 	def __init__(self) -> None:
