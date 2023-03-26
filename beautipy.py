@@ -73,12 +73,12 @@ def _format_line(line_tokens: list[tokenize.TokenInfo], indentation: int) -> str
 	split_depth = 0
 	_format_node(tree.root, indentation, 0, split_depth)
 	assert tree.root.formatted
-	while max(len(l.replace('\t', '    ')) for l in tree.root.formatted) > 120 and split_depth < 5:
+	while _width(tree.root.formatted) > 120 and split_depth < 5:
 		split_depth += 1
 		_format_node(tree.root, indentation, 0, split_depth)
 	return '\n'.join(tree.root.formatted)
 
-def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, split_depth: int):
+def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, split_depth: int) -> None:
 	lines = line_manager.Lines(indentation, indented=depth != 0)
 	split = depth <= split_depth or \
 		any(isinstance(tok, tokenize.TokenInfo) and tok.type == token.COMMENT for tok in node.children)
@@ -105,7 +105,7 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 	node.formatted = lines.get_values()
 
 def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional[int],
-		  lines: line_manager.Lines, prev_token_was_comma: bool, next_token: typing.Optional[tokenize.TokenInfo]):
+		lines: line_manager.Lines, prev_token_was_comma: bool, next_token: typing.Optional[tokenize.TokenInfo]) -> None:
 	# prefix
 	if tok.type == token.OP:
 		if tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
@@ -140,7 +140,21 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional
 	elif tok.type == token.COMMENT:
 		lines.new_line()
 
-def _debug(children: list[token_tree.Node]):
+def _width(formatted: list[str]) -> int:
+	max_width = 0
+	for line in formatted:
+		width = 0
+		for i, ch in enumerate(line):
+			if ch == '\t':
+				width += 4
+			else:
+				width += len(line) - i
+				break
+		if width > max_width:
+			max_width = width
+	return max_width
+
+def _debug(children: list[token_tree.Node]) -> None:
 	for tok in children:
 		if isinstance(tok, token_tree.TokenTreeNode):
 			print(tok.formatted)
