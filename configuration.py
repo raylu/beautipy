@@ -19,11 +19,9 @@ def _parse_args():
 			help='files to format')
 	return parser.parse_intermixed_args()
 
-def _make_config():
+def make_config():
 	options = _parse_args()
 	line_nos = None
 	if options.lines is not None:
 		line_nos = tuple(map(int, options.lines.split('-', 1)))
 	return Config(options.filepaths, options.diff, line_nos)
-
-config = _make_config()

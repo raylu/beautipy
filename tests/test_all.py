@@ -13,6 +13,6 @@ class Test(unittest.TestCase):
 	
 	def run_testcase(self, case: pathlib.Path):
 		with case.open('rb') as f:
-			result = '\n'.join(beautipy.beautify(f)) + '\n'
+			result = '\n'.join(beautipy.beautify(f, None)) + '\n'
 		with case.with_name(case.name + '_expected').open('r') as f:
 			assert result == f.read()

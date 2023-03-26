@@ -6,11 +6,12 @@ import token
 import tokenize
 import typing
 
-from config import config
+import configuration
 import line_manager
 import token_tree
 
 def main() -> None:
+	config = configuration.make_config()
 	for path in config.filepaths:
 		if config.diff:
 			with path.open('r') as f:
