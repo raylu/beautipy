@@ -83,6 +83,7 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 	split = depth <= split_depth or \
 		any(isinstance(tok, tokenize.TokenInfo) and tok.type == token.COMMENT for tok in node.children)
 
+	leading_nls = True
 	prev_token_was_comma = False
 	for i, tok in enumerate(node.children):
 		if isinstance(tok, token_tree.TokenTreeNode):
@@ -92,15 +93,18 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 			lines.write(tok.formatted[0])
 			for sub_line in tok.formatted[1:]:
 				lines.new_line(sub_line)
-			prev_token_was_comma = False
+			prev_token_was_comma = leading_nls = False
 		else:
 			if tok.type == token.NL:
-				continue
-			next_token: typing.Optional[tokenize.TokenInfo] = None
-			if len(node.children) > i + 1 and isinstance(node.children[i+1], tokenize.TokenInfo):
-				next_token = typing.cast(tokenize.TokenInfo, node.children[i+1])
-			_format_token(tok, split, node.context, lines, prev_token_was_comma, next_token)
-			prev_token_was_comma = tok.exact_type == token.COMMA
+				if leading_nls: # preserve NLs at beginning of line
+					lines.new_line()
+			else:
+				next_token: typing.Optional[tokenize.TokenInfo] = None
+				if len(node.children) > i + 1 and isinstance(node.children[i+1], tokenize.TokenInfo):
+					next_token = typing.cast(tokenize.TokenInfo, node.children[i+1])
+				_format_token(tok, split, node.context, lines, prev_token_was_comma, next_token)
+				leading_nls = False
+				prev_token_was_comma = tok.exact_type == token.COMMA
 
 	node.formatted = lines.get_values()
 
@@ -159,7 +163,7 @@ def _debug(children: list[token_tree.Node]) -> None:
 		if isinstance(tok, token_tree.TokenTreeNode):
 			print(tok.formatted)
 		else:
-			print(tok)
+			print(f'{token.tok_name[tok.exact_type]}\t{tok}')
 
 if __name__ == '__main__':
 	main()
