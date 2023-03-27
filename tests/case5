@@ -4,4 +4,7 @@ class B:
 	@staticmethod
 	def c()->None: pass
 
-def d():pass
+def d(e: list[tuple[None]]):
+	f: set = {e[0]}
+
+class G: pass

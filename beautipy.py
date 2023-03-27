@@ -83,8 +83,8 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 	split = depth <= split_depth or \
 		any(isinstance(tok, tokenize.TokenInfo) and tok.type == token.COMMENT for tok in node.children)
 
+	context = token_tree.Context(delim_context=node.delim_context, fn_def=False, prev_token_was_comma=False)
 	leading_nls = True
-	prev_token_was_comma = False
 	for i, tok in enumerate(node.children):
 		if isinstance(tok, token_tree.TokenTreeNode):
 			if tok.formatted is None or depth + 1 <= split_depth:
@@ -93,32 +93,41 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 			lines.write(tok.formatted[0])
 			for sub_line in tok.formatted[1:]:
 				lines.new_line(sub_line)
-			prev_token_was_comma = leading_nls = False
+			context.prev_token_was_comma = leading_nls = False
 		else:
 			if tok.type == token.NL:
 				if leading_nls: # preserve NLs at beginning of line
 					lines.new_line()
 			else:
 				next_token: typing.Optional[tokenize.TokenInfo] = None
-				if len(node.children) > i + 1 and isinstance(node.children[i+1], tokenize.TokenInfo):
-					next_token = typing.cast(tokenize.TokenInfo, node.children[i+1])
-				_format_token(tok, split, node.context, lines, prev_token_was_comma, next_token)
+				if len(node.children) > i + 1:
+					next_node = node.children[i+1]
+					while isinstance(next_node, token_tree.TokenTreeNode):
+						next_node = next_node.children[0]
+					next_token = next_node
+
+				_format_token(tok, split, context, lines, next_token)
+
+				if tok.type == token.NAME and tok.string == 'def':
+					context.fn_def = True
+				elif context.fn_def and tok.exact_type == token.COLON:
+					context.fn_def = False
 				leading_nls = False
-				prev_token_was_comma = tok.exact_type == token.COMMA
+				context.prev_token_was_comma = tok.exact_type == token.COMMA
 
 	node.formatted = lines.get_values()
 
-def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional[int],
-		lines: line_manager.Lines, prev_token_was_comma: bool, next_token: typing.Optional[tokenize.TokenInfo]) -> None:
+def _format_token(tok: tokenize.TokenInfo, split: bool, context: token_tree.Context,
+		lines: line_manager.Lines, next_token: typing.Optional[tokenize.TokenInfo]) -> None:
 	# prefix
 	if tok.type == token.OP:
 		if tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
 			if split:
 				lines.indentation -= 1
-				if not prev_token_was_comma:
+				if not context.prev_token_was_comma:
 					lines.write(',')
 					lines.new_line()
-		elif tok.exact_type == token.EQUAL and context != token.LPAR:
+		elif tok.exact_type == token.EQUAL and context.delim_context != token.LPAR:
 			lines.write(' ')
 		elif tok.exact_type == token.RARROW:
 			lines.write(' ')
@@ -127,7 +136,7 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional
 
 	# suffix
 	if tok.type == token.NAME:
-		if keyword.iskeyword(tok.string) and tok.string not in ('True', 'False', 'None'):
+		if keyword.iskeyword(tok.string) and tok.string not in ('True', 'False', 'None') and next_token is not None:
 			lines.write(' ')
 	elif tok.type == token.OP:
 		if tok.exact_type in (token.LPAR, token.LSQB, token.LBRACE):
@@ -139,14 +148,15 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional
 				lines.new_line()
 			else:
 				lines.write(' ')
-		elif tok.exact_type == token.EQUAL and context != token.LPAR:
+		elif tok.exact_type == token.EQUAL and context.delim_context != token.LPAR:
 			lines.write(' ')
 		elif tok.exact_type == token.COLON:
-			if context == token.LBRACE: # {key: val}
-				lines.write(' ')
-			elif next_token is not None: # 'def f():' or 'class C:'
-				lines.new_line()
-				lines.indentation += 1
+			if next_token is not None:
+				if context.fn_def: # 'def f():'
+					lines.new_line()
+					lines.indentation += 1
+				else: # '{k: v}' or 'a: T = b' or 'if a:' or 'class A:'
+					lines.write(' ')
 		elif tok.exact_type == token.RARROW:
 			lines.write(' ')
 	elif tok.type == token.COMMENT:
