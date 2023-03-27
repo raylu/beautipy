@@ -120,6 +120,8 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional
 					lines.new_line()
 		elif tok.exact_type == token.EQUAL and context != token.LPAR:
 			lines.write(' ')
+		elif tok.exact_type == token.RARROW:
+			lines.write(' ')
 
 	lines.write(tok.string)
 
@@ -139,7 +141,13 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: typing.Optional
 				lines.write(' ')
 		elif tok.exact_type == token.EQUAL and context != token.LPAR:
 			lines.write(' ')
-		elif tok.exact_type == token.COLON and context == token.LBRACE:
+		elif tok.exact_type == token.COLON:
+			if context == token.LBRACE: # {key: val}
+				lines.write(' ')
+			elif next_token is not None: # 'def f():' or 'class C:'
+				lines.new_line()
+				lines.indentation += 1
+		elif tok.exact_type == token.RARROW:
 			lines.write(' ')
 	elif tok.type == token.COMMENT:
 		lines.new_line()

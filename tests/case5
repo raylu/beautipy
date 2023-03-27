@@ -1,0 +1,7 @@
+import a
+
+class B:
+	@staticmethod
+	def c()->None: pass
+
+def d():pass
