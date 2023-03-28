@@ -1,0 +1,4 @@
+a = (lambda: [1 < 2, 3 if 4 and 5 or 6 in [] else not None][int(0 + 1 - 2 / 3 * 4)])()
+a += 1
+if 1 and 2 or 3:
+    pass

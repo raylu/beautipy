@@ -120,7 +120,10 @@ def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, s
 def _format_token(tok: tokenize.TokenInfo, split: bool, context: token_tree.Context,
 		lines: line_manager.Lines, next_token: typing.Optional[tokenize.TokenInfo]) -> None:
 	# prefix
-	if tok.type == token.OP:
+	if tok.type == token.NAME:
+		if tok.string in ('and', 'or'):
+			lines.write(' ')
+	elif tok.type == token.OP:
 		if tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
 			if split:
 				lines.indentation -= 1
@@ -129,7 +132,9 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: token_tree.Cont
 					lines.new_line()
 		elif tok.exact_type == token.EQUAL and context.delim_context != token.LPAR:
 			lines.write(' ')
-		elif tok.exact_type == token.RARROW:
+		elif tok.exact_type in (token.RARROW, token.LESS, token.LESSEQUAL, token.EQEQUAL, token.GREATER,
+				token.GREATEREQUAL, token.PLUS, token, token.PLUSEQUAL, token.MINUS, token.MINEQUAL, token.SLASH,
+				token.SLASHEQUAL):
 			lines.write(' ')
 
 	lines.write(tok.string)
@@ -157,7 +162,9 @@ def _format_token(tok: tokenize.TokenInfo, split: bool, context: token_tree.Cont
 					lines.indentation += 1
 				else: # '{k: v}' or 'a: T = b' or 'if a:' or 'class A:'
 					lines.write(' ')
-		elif tok.exact_type == token.RARROW:
+		elif tok.exact_type in (token.RARROW, token.LESS, token.LESSEQUAL, token.EQEQUAL, token.GREATER,
+				token.GREATEREQUAL, token.PLUS, token, token.PLUSEQUAL, token.MINUS, token.MINEQUAL, token.SLASH,
+				token.SLASHEQUAL):
 			lines.write(' ')
 	elif tok.type == token.COMMENT:
 		lines.new_line()
