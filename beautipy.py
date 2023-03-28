@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 import difflib
-import keyword
 import token
 import tokenize
 import typing
 
+import libcst as cst
+import libcst.metadata
+
 import configuration
-import line_manager
-import token_tree
 
 def main() -> None:
 	config = configuration.make_config()
@@ -17,46 +17,67 @@ def main() -> None:
 			with path.open('r') as f:
 				orig_lines = f.readlines()
 			with path.open('rb') as f:
-				formatted = '\n'.join(beautify(f, config.line_nos))
+				formatted = beautify(f, config.line_nos).decode()
 				formatted_lines = [line + '\n' for line in formatted.split('\n')]
 			print(''.join(difflib.unified_diff(orig_lines, formatted_lines)))
 		else:
 			with path.open('rb') as f:
-				print('\n'.join(beautify(f, config.line_nos)))
+				print(beautify(f, config.line_nos).decode(), end='')
 
-def beautify(f: typing.BinaryIO, line_nos: typing.Optional[tuple[int, int]]) -> typing.Iterable[str]:
-	tokens = tokenize.tokenize(f.readline)
-	encoding = next(tokens)
-	assert encoding.type == token.ENCODING
+def beautify(f: typing.BinaryIO, line_nos: typing.Optional[tuple[int, int]]) -> bytes:
+	tree = cst.MetadataWrapper(cst.parse_module(f.read()))
+	return tree.visit(TreeBeautifier()).bytes
 
-	line_tokens: list[tokenize.TokenInfo] = []
-	indentation = 0
-	for tok in tokens:
-		if tok.type == token.NEWLINE:
-			if line_nos is None:
-				yield _format_line(line_tokens, indentation)
-			else:
-				format_start, format_end = line_nos
-				line_start = line_tokens[0].start[0]
-				line_end = line_tokens[-1].end[0]
-				if format_start <= line_end and line_start <= format_end:
-					yield _format_line(line_tokens, indentation)
-				else:
-					# reproduce the line exactly
-					print_next = True
-					for tok in line_tokens:
-						if print_next:
-							yield tok.line.rstrip('\n')
-						print_next = tok.type == token.NL
-			line_tokens.clear()
-		elif tok.type == token.INDENT:
-			indentation += 1
-		elif tok.type == token.DEDENT:
-			indentation -= 1
-		else:
-			line_tokens.append(tok)
+class TreeBeautifier(cst.CSTTransformer):
+	METADATA_DEPENDENCIES = (libcst.metadata.ParentNodeProvider,)
+	SPACE = cst.SimpleWhitespace(' ')
+	NO_SPACE = cst.SimpleWhitespace('')
+	NEWLINE = cst.TrailingWhitespace(newline=cst.Newline())
 
-	assert tok.type == token.ENDMARKER
+	def visit_Module_body(self, node: cst.Module) -> None:
+		#print(node.body)
+		pass
+
+	def leave_IndentedBlock(self, orig, node: cst.IndentedBlock) -> cst.IndentedBlock:
+		return node.with_changes(indent='\t')
+
+	def leave_Comma(self, orig, node: cst.Comma) -> cst.Comma:
+		parent = self.get_metadata(libcst.metadata.ParentNodeProvider, orig)
+		if isinstance(parent, cst.DictElement):
+			return node.with_changes(whitespace_before=self.NO_SPACE, whitespace_after=self.NEWLINE)
+		return self._space(node, before=False, after=True)
+	
+	def leave_AssignEqual(self, orig, node: cst.AssignEqual) -> cst.AssignEqual:
+		return self._space(node, before=False, after=False)
+
+	def leave_LeftCurlyBrace(self, orig, node: cst.LeftCurlyBrace) -> cst.LeftCurlyBrace:
+		return self._space(node, after=False)
+
+	def leave_RightCurlyBrace(self, orig, node: cst.RightCurlyBrace) -> cst.RightCurlyBrace:
+		return self._space(node, before=False)
+
+	def leave_DictElement(self, orig, node: cst.DictElement) -> cst.DictElement:
+		return self._space(node, 'colon', before=False, after=True)
+
+	def leave_If(self, orig, node: cst.If) -> cst.If:
+		return self._space(node, 'test', after=False)
+	
+	@classmethod
+	def _space(cls, node: cst.CSTNodeT, suffix = '', before: typing.Optional[bool] = None,
+			after: typing.Optional[bool] = None) -> cst.CSTNodeT:
+		changes = {}
+		if before is True:
+			changes['whitespace_before'] = cls.SPACE
+		elif before is False:
+			changes['whitespace_before'] = cls.NO_SPACE
+		if after is True:
+			changes['whitespace_after'] = cls.SPACE
+		elif after is False:
+			changes['whitespace_after'] = cls.NO_SPACE
+
+		if suffix:
+			changes = {f'{k}_{suffix}': v for k, v in changes.items()}
+		return node.with_changes(**changes)
 
 def _format_line(line_tokens: list[tokenize.TokenInfo], indentation: int) -> str:
 	tree = token_tree.TokenTree()
@@ -78,97 +99,6 @@ def _format_line(line_tokens: list[tokenize.TokenInfo], indentation: int) -> str
 		_format_node(tree.root, indentation, 0, split_depth)
 	return '\n'.join(tree.root.formatted)
 
-def _format_node(node: token_tree.TokenTreeNode, indentation: int, depth: int, split_depth: int) -> None:
-	lines = line_manager.Lines(indentation, indented=depth != 0)
-	split = depth <= split_depth or \
-		any(isinstance(tok, tokenize.TokenInfo) and tok.type == token.COMMENT for tok in node.children)
-
-	context = token_tree.Context(delim_context=node.delim_context, fn_def=False, prev_token_was_comma=False)
-	leading_nls = True
-	for i, tok in enumerate(node.children):
-		if isinstance(tok, token_tree.TokenTreeNode):
-			if tok.formatted is None or depth + 1 <= split_depth:
-				_format_node(tok, lines.indentation, depth + 1, split_depth)
-				assert tok.formatted
-			lines.write(tok.formatted[0])
-			for sub_line in tok.formatted[1:]:
-				lines.new_line(sub_line)
-			context.prev_token_was_comma = leading_nls = False
-		else:
-			if tok.type == token.NL:
-				if leading_nls: # preserve NLs at beginning of line
-					lines.new_line()
-			else:
-				next_token: typing.Optional[tokenize.TokenInfo] = None
-				if len(node.children) > i + 1:
-					next_node = node.children[i+1]
-					while isinstance(next_node, token_tree.TokenTreeNode):
-						next_node = next_node.children[0]
-					next_token = next_node
-
-				_format_token(tok, split, context, lines, next_token)
-
-				if tok.type == token.NAME and tok.string == 'def':
-					context.fn_def = True
-				elif context.fn_def and tok.exact_type == token.COLON:
-					context.fn_def = False
-				leading_nls = False
-				context.prev_token_was_comma = tok.exact_type == token.COMMA
-
-	node.formatted = lines.get_values()
-
-def _format_token(tok: tokenize.TokenInfo, split: bool, context: token_tree.Context,
-		lines: line_manager.Lines, next_token: typing.Optional[tokenize.TokenInfo]) -> None:
-	# prefix
-	if tok.type == token.NAME:
-		if tok.string in ('and', 'or'):
-			lines.write(' ')
-	elif tok.type == token.OP:
-		if tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
-			if split:
-				lines.indentation -= 1
-				if not context.prev_token_was_comma:
-					lines.write(',')
-					lines.new_line()
-		elif tok.exact_type == token.EQUAL and context.delim_context != token.LPAR:
-			lines.write(' ')
-		elif tok.exact_type in (token.RARROW, token.LESS, token.LESSEQUAL, token.EQEQUAL, token.GREATER,
-				token.GREATEREQUAL, token.PLUS, token, token.PLUSEQUAL, token.MINUS, token.MINEQUAL, token.SLASH,
-				token.SLASHEQUAL):
-			lines.write(' ')
-
-	lines.write(tok.string)
-
-	# suffix
-	if tok.type == token.NAME:
-		if keyword.iskeyword(tok.string) and tok.string not in ('True', 'False', 'None') and next_token is not None:
-			lines.write(' ')
-	elif tok.type == token.OP:
-		if tok.exact_type in (token.LPAR, token.LSQB, token.LBRACE):
-			if split:
-				lines.indentation += 1
-				lines.new_line()
-		elif tok.exact_type == token.COMMA:
-			if split and (not next_token or next_token.type != token.COMMENT):
-				lines.new_line()
-			else:
-				lines.write(' ')
-		elif tok.exact_type == token.EQUAL and context.delim_context != token.LPAR:
-			lines.write(' ')
-		elif tok.exact_type == token.COLON:
-			if next_token is not None:
-				if context.fn_def: # 'def f():'
-					lines.new_line()
-					lines.indentation += 1
-				else: # '{k: v}' or 'a: T = b' or 'if a:' or 'class A:'
-					lines.write(' ')
-		elif tok.exact_type in (token.RARROW, token.LESS, token.LESSEQUAL, token.EQEQUAL, token.GREATER,
-				token.GREATEREQUAL, token.PLUS, token, token.PLUSEQUAL, token.MINUS, token.MINEQUAL, token.SLASH,
-				token.SLASHEQUAL):
-			lines.write(' ')
-	elif tok.type == token.COMMENT:
-		lines.new_line()
-
 def _width(formatted: list[str]) -> int:
 	max_width = 0
 	for line in formatted:
@@ -182,13 +112,6 @@ def _width(formatted: list[str]) -> int:
 		if width > max_width:
 			max_width = width
 	return max_width
-
-def _debug(children: list[token_tree.Node]) -> None:
-	for tok in children:
-		if isinstance(tok, token_tree.TokenTreeNode):
-			print(tok.formatted)
-		else:
-			print(f'{token.tok_name[tok.exact_type]}\t{tok}')
 
 if __name__ == '__main__':
 	main()

@@ -7,7 +7,7 @@ import beautipy
 def _make_test(case: pathlib.Path) -> typing.Callable:
 	def test(self: 'Test') -> None:
 		with case.open('rb') as f:
-			result = '\n'.join(beautipy.beautify(f, None)) + '\n'
+			result = beautipy.beautify(f, None).decode()
 		with case.with_name(case.name + '_expected').open('r') as f:
 			assert result == f.read()
 
