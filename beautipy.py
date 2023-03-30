@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 import difflib
-import token
-import tokenize
 import typing
 
 import libcst as cst
@@ -25,26 +23,30 @@ def main() -> None:
 				print(beautify(f, config.line_nos).decode(), end='')
 
 def beautify(f: typing.BinaryIO, line_nos: typing.Optional[tuple[int, int]]) -> bytes:
-	tree = cst.MetadataWrapper(cst.parse_module(f.read()))
-	return tree.visit(TreeBeautifier()).bytes
+	module = cst.parse_module(f.read()).with_changes(default_indent='\t')
+	return cst.MetadataWrapper(module).visit(TreeBeautifier()).bytes
+
+SPACE = cst.SimpleWhitespace(' ')
+NO_SPACE = cst.SimpleWhitespace('')
+NEWLINE = cst.ParenthesizedWhitespace(cst.TrailingWhitespace(newline=cst.Newline()), indent=True,
+	last_line=cst.SimpleWhitespace('\t'))
+DEDENT_NEWLINE = cst.ParenthesizedWhitespace(cst.TrailingWhitespace(newline=cst.Newline()), indent=True)
 
 class TreeBeautifier(cst.CSTTransformer):
-	METADATA_DEPENDENCIES = (libcst.metadata.ParentNodeProvider,)
-	SPACE = cst.SimpleWhitespace(' ')
-	NO_SPACE = cst.SimpleWhitespace('')
-	NEWLINE = cst.TrailingWhitespace(newline=cst.Newline())
+	METADATA_DEPENDENCIES = (libcst.metadata.ExperimentalReentrantCodegenProvider,)
 
-	def visit_Module_body(self, node: cst.Module) -> None:
-		#print(node.body)
-		pass
+	def leave_SimpleStatementLine(self, orig, node: cst.SimpleStatementLine) -> cst.SimpleStatementLine:
+		codegen = self.get_metadata(libcst.metadata.ExperimentalReentrantCodegenProvider, orig)
+		split_depth = 1
+		while split_depth < 5 and _width(codegen.get_modified_statement_code(node)) > 120:
+			node = node.with_changes(body=[_format_node(child, 0, split_depth) for child in node.body])
+			split_depth += 1
+		return node
 
 	def leave_IndentedBlock(self, orig, node: cst.IndentedBlock) -> cst.IndentedBlock:
 		return node.with_changes(indent='\t')
 
 	def leave_Comma(self, orig, node: cst.Comma) -> cst.Comma:
-		parent = self.get_metadata(libcst.metadata.ParentNodeProvider, orig)
-		if isinstance(parent, cst.DictElement):
-			return node.with_changes(whitespace_before=self.NO_SPACE, whitespace_after=self.NEWLINE)
 		return self._space(node, before=False, after=True)
 	
 	def leave_AssignEqual(self, orig, node: cst.AssignEqual) -> cst.AssignEqual:
@@ -67,41 +69,41 @@ class TreeBeautifier(cst.CSTTransformer):
 			after: typing.Optional[bool] = None) -> cst.CSTNodeT:
 		changes = {}
 		if before is True:
-			changes['whitespace_before'] = cls.SPACE
+			changes['whitespace_before'] = SPACE
 		elif before is False:
-			changes['whitespace_before'] = cls.NO_SPACE
+			changes['whitespace_before'] = NO_SPACE
 		if after is True:
-			changes['whitespace_after'] = cls.SPACE
+			changes['whitespace_after'] = SPACE
 		elif after is False:
-			changes['whitespace_after'] = cls.NO_SPACE
+			changes['whitespace_after'] = NO_SPACE
 
 		if suffix:
 			changes = {f'{k}_{suffix}': v for k, v in changes.items()}
 		return node.with_changes(**changes)
 
-def _format_line(line_tokens: list[tokenize.TokenInfo], indentation: int) -> str:
-	tree = token_tree.TokenTree()
-	for tok in line_tokens:
-		if tok.type == token.OP and tok.exact_type in (token.LPAR, token.LSQB, token.LBRACE):
-			tree.push(tok.exact_type)
+def _format_node(node: cst.CSTNode, depth: int, split_depth: int) -> cst.CSTNode:
+	if isinstance(node, cst.Dict):
+		depth += 1
+		if depth == split_depth and len(node.elements) > 0:
+			comma_newline = cst.Comma(whitespace_after=NEWLINE)
+			elements = [element.with_changes(comma=comma_newline) for element in node.elements[:-1]]
+			elements.append(node.elements[-1].with_changes(comma=cst.Comma()))
+			return node.with_changes(elements=elements,
+			    lbrace=cst.LeftCurlyBrace(whitespace_after=NEWLINE),
+				rbrace=cst.RightCurlyBrace(whitespace_before=DEDENT_NEWLINE))
+		return node
+	elif isinstance(node, cst.BaseCompoundStatement):
+		return node.with_changes(body=_format_node(node.body, depth, split_depth))
+	elif isinstance(node, cst.BaseSuite):
+		return node.with_changes(body=[_format_node(stmt, depth, split_depth) for stmt in node.body])
+	elif isinstance(node, cst.Assign):
+		return node.with_changes(value=_format_node(node.value, depth, split_depth))
+	else:
+		return node
 
-		tree.append(tok)
-
-		if tok.type == token.OP and tok.exact_type in (token.RPAR, token.RSQB, token.RBRACE):
-			tree.pop(tok.exact_type)
-	assert len(tree.stack) == 1
-
-	split_depth = 0
-	_format_node(tree.root, indentation, 0, split_depth)
-	assert tree.root.formatted
-	while _width(tree.root.formatted) > 120 and split_depth < 5:
-		split_depth += 1
-		_format_node(tree.root, indentation, 0, split_depth)
-	return '\n'.join(tree.root.formatted)
-
-def _width(formatted: list[str]) -> int:
+def _width(formatted: str) -> int:
 	max_width = 0
-	for line in formatted:
+	for line in formatted.split('\n'):
 		width = 0
 		for i, ch in enumerate(line):
 			if ch == '\t':
