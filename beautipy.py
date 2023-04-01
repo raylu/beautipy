@@ -26,7 +26,7 @@ def main() -> None:
 
 def beautify(f: typing.BinaryIO, line_nos: typing.Optional[tuple[int, int]]) -> bytes:
 	module = cst.parse_module(f.read()).with_changes(default_indent='\t')
-	return cst.MetadataWrapper(module).visit(TreeBeautifier()).bytes
+	return cst.MetadataWrapper(module).visit(TreeBeautifier(line_nos)).bytes
 
 SPACE = cst.SimpleWhitespace(' ')
 NO_SPACE = cst.SimpleWhitespace('')
@@ -36,12 +36,15 @@ def _indented_newline(indent_level: int) -> cst.ParenthesizedWhitespace:
 		last_line=cst.SimpleWhitespace('\t' * indent_level))
 
 class TreeBeautifier(cst.CSTTransformer):
-	METADATA_DEPENDENCIES = (libcst.metadata.ExperimentalReentrantCodegenProvider,)
+	METADATA_DEPENDENCIES = (libcst.metadata.PositionProvider, libcst.metadata.ExperimentalReentrantCodegenProvider)
 
-	def __init__(self) -> None:
+	def __init__(self, line_nos: typing.Optional[tuple[int, int]]) -> None:
 		self.indent_level = 0
+		self.line_nos = line_nos
 
 	def leave_SimpleStatementLine(self, orig, node: cst.SimpleStatementLine) -> cst.SimpleStatementLine:
+		if not self._should_format(orig):
+			return node
 		codegen = self.get_metadata(libcst.metadata.ExperimentalReentrantCodegenProvider, orig)
 		context = FormatContext(depth=0, split_depth=0, indent_level=self.indent_level)
 		while context.split_depth < 5 and _width(codegen.get_modified_statement_code(node)) > 120:
@@ -54,26 +57,47 @@ class TreeBeautifier(cst.CSTTransformer):
 
 	def leave_IndentedBlock(self, orig, node: cst.IndentedBlock) -> cst.IndentedBlock:
 		self.indent_level -= 1
+		if not self._should_format(orig):
+			return node
 		return node.with_changes(indent='\t')
 
 	def leave_Comma(self, orig, node: cst.Comma) -> cst.Comma:
+		if not self._should_format(orig):
+			return node
 		return self._space(node, before=False, after=True)
 	
 	def leave_AssignEqual(self, orig, node: cst.AssignEqual) -> cst.AssignEqual:
+		if not self._should_format(orig):
+			return node
 		return self._space(node, before=False, after=False)
 
 	def leave_LeftCurlyBrace(self, orig, node: cst.LeftCurlyBrace) -> cst.LeftCurlyBrace:
+		if not self._should_format(orig):
+			return node
 		return self._space(node, after=False)
 
 	def leave_RightCurlyBrace(self, orig, node: cst.RightCurlyBrace) -> cst.RightCurlyBrace:
+		if not self._should_format(orig):
+			return node
 		return self._space(node, before=False)
 
 	def leave_DictElement(self, orig, node: cst.DictElement) -> cst.DictElement:
+		if not self._should_format(orig):
+			return node
 		return self._space(node, 'colon', before=False, after=True)
 
 	def leave_If(self, orig, node: cst.If) -> cst.If:
+		if not self._should_format(orig):
+			return node
 		return self._space(node, 'test', after=False)
 	
+	def _should_format(self, orig: cst.CSTNode) -> bool:
+		if self.line_nos is None:
+			return True
+		pos = self.get_metadata(libcst.metadata.PositionProvider, orig)
+		format_start, format_end = self.line_nos
+		return format_start <= pos.end.line and pos.start.line <= format_end
+
 	@classmethod
 	def _space(cls, node: cst.CSTNodeT, suffix = '', before: typing.Optional[bool] = None,
 			after: typing.Optional[bool] = None) -> cst.CSTNodeT:
