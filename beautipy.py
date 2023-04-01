@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
+import dataclasses
 import difflib
 import typing
 
 import libcst as cst
 import libcst.metadata
+import libcst._nodes.expression
 
 import configuration
 
@@ -28,22 +30,30 @@ def beautify(f: typing.BinaryIO, line_nos: typing.Optional[tuple[int, int]]) -> 
 
 SPACE = cst.SimpleWhitespace(' ')
 NO_SPACE = cst.SimpleWhitespace('')
-NEWLINE = cst.ParenthesizedWhitespace(cst.TrailingWhitespace(newline=cst.Newline()), indent=True,
-	last_line=cst.SimpleWhitespace('\t'))
-DEDENT_NEWLINE = cst.ParenthesizedWhitespace(cst.TrailingWhitespace(newline=cst.Newline()), indent=True)
+
+def _indented_newline(indent_level: int) -> cst.ParenthesizedWhitespace:
+	return cst.ParenthesizedWhitespace(cst.TrailingWhitespace(newline=cst.Newline()), indent=True,
+		last_line=cst.SimpleWhitespace('\t' * indent_level))
 
 class TreeBeautifier(cst.CSTTransformer):
 	METADATA_DEPENDENCIES = (libcst.metadata.ExperimentalReentrantCodegenProvider,)
 
+	def __init__(self) -> None:
+		self.indent_level = 0
+
 	def leave_SimpleStatementLine(self, orig, node: cst.SimpleStatementLine) -> cst.SimpleStatementLine:
 		codegen = self.get_metadata(libcst.metadata.ExperimentalReentrantCodegenProvider, orig)
-		split_depth = 1
-		while split_depth < 5 and _width(codegen.get_modified_statement_code(node)) > 120:
-			node = node.with_changes(body=[_format_node(child, 0, split_depth) for child in node.body])
-			split_depth += 1
+		context = FormatContext(depth=0, split_depth=0, indent_level=self.indent_level)
+		while context.split_depth < 5 and _width(codegen.get_modified_statement_code(node)) > 120:
+			context = dataclasses.replace(context, split_depth=context.split_depth + 1)
+			node = node.with_changes(body=[_format_node(child, context) for child in node.body])
 		return node
 
+	def visit_IndentedBlock(self, node: cst.IndentedBlock) -> None:
+		self.indent_level += 1
+
 	def leave_IndentedBlock(self, orig, node: cst.IndentedBlock) -> cst.IndentedBlock:
+		self.indent_level -= 1
 		return node.with_changes(indent='\t')
 
 	def leave_Comma(self, orig, node: cst.Comma) -> cst.Comma:
@@ -81,25 +91,54 @@ class TreeBeautifier(cst.CSTTransformer):
 			changes = {f'{k}_{suffix}': v for k, v in changes.items()}
 		return node.with_changes(**changes)
 
-def _format_node(node: cst.CSTNode, depth: int, split_depth: int) -> cst.CSTNode:
+@dataclasses.dataclass(eq=False, frozen=True)
+class FormatContext:
+	depth: int
+	split_depth: int
+	indent_level: int
+
+	def incr_depth(self) -> 'FormatContext':
+		return dataclasses.replace(self, depth=self.depth + 1)
+
+	def incr_split_depth(self) -> 'FormatContext':
+		return dataclasses.replace(self, split_depth=self.split_depth + 1)
+
+def _format_node(node: cst.CSTNode, context: FormatContext) -> cst.CSTNode:
 	if isinstance(node, cst.Dict):
-		depth += 1
-		if depth == split_depth and len(node.elements) > 0:
-			comma_newline = cst.Comma(whitespace_after=NEWLINE)
-			elements = [element.with_changes(comma=comma_newline) for element in node.elements[:-1]]
-			elements.append(node.elements[-1].with_changes(comma=cst.Comma()))
-			return node.with_changes(elements=elements,
-			    lbrace=cst.LeftCurlyBrace(whitespace_after=NEWLINE),
-				rbrace=cst.RightCurlyBrace(whitespace_before=DEDENT_NEWLINE))
-		return node
+		context = context.incr_depth()
+		if context.depth == context.split_depth and len(node.elements) > 0:
+			newline = _indented_newline(context.indent_level + context.depth)
+			return node.with_changes(elements=_split_elements(node.elements, newline),
+			    lbrace=cst.LeftCurlyBrace(whitespace_after=newline),
+				rbrace=cst.RightCurlyBrace(whitespace_before=_indented_newline(context.indent_level + context.depth - 1)))
+		else:
+			return node.with_changes(elements=[_format_node(element, context) for element in node.elements])
+	elif isinstance(node, cst.List):
+		context = context.incr_depth()
+		if context.depth == context.split_depth and len(node.elements) > 0:
+			newline = _indented_newline(context.indent_level + context.depth)
+			return node.with_changes(elements=_split_elements(node.elements, newline),
+			    lbracket=cst.LeftSquareBracket(whitespace_after=newline),
+				rbracket=cst.RightSquareBracket(whitespace_before=_indented_newline(context.indent_level + context.depth - 1)))
+		else:
+			return node.with_changes(elements=[_format_node(element, context) for element in node.elements])
+	elif isinstance(node, (cst.Element, cst.DictElement)):
+		return node.with_changes(value=_format_node(node.value, context))
 	elif isinstance(node, cst.BaseCompoundStatement):
-		return node.with_changes(body=_format_node(node.body, depth, split_depth))
+		return node.with_changes(body=_format_node(node.body, context))
 	elif isinstance(node, cst.BaseSuite):
-		return node.with_changes(body=[_format_node(stmt, depth, split_depth) for stmt in node.body])
+		return node.with_changes(body=[_format_node(stmt, context) for stmt in node.body])
 	elif isinstance(node, cst.Assign):
-		return node.with_changes(value=_format_node(node.value, depth, split_depth))
+		return node.with_changes(value=_format_node(node.value, context))
 	else:
 		return node
+
+Elements = typing.Sequence[libcst._nodes.expression._BaseElementImpl]
+def _split_elements(elements: Elements, newline: cst.ParenthesizedWhitespace) -> Elements:
+	comma_newline = cst.Comma(whitespace_after=newline)
+	new_elements = [element.with_changes(comma=comma_newline) for element in elements[:-1]]
+	new_elements.append(elements[-1].with_changes(comma=cst.Comma()))
+	return new_elements
 
 def _width(formatted: str) -> int:
 	max_width = 0
